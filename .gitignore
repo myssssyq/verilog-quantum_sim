@@ -1,0 +1,5 @@
+sim/qsim_sim
+*.vcd
+__pycache__/
+*.pyc
+.vscode/
