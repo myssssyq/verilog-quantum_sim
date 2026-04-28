@@ -3,3 +3,15 @@ sim/qsim_sim
 __pycache__/
 *.pyc
 .vscode/
+sim/*_sim
+sim/*.exe
+qsim_tangnano9k/impl/
+qsim_tangnano9k/*.gprj.user
+*.fs
+*.bin
+*.binx
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.swp

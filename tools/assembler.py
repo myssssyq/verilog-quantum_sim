@@ -21,6 +21,10 @@ Supported instructions:
   INITBASIS <n>
   SHOTS <n>
   RUNSHOTS
+  T <q>
+  TDG <q>
+  S <q>
+  SDG <q>
   HALT
 """
 
@@ -39,11 +43,15 @@ OPCODES = {
     'INITBASIS': 0x8,
     'SHOTS':     0x9,
     'RUNSHOTS':  0xA,
+    'T':         0xB,
+    'TDG':       0xC,
+    'S':         0xD,
+    'SDG':       0xE,
     'HALT':      0xF,
 }
 
 # Instructions that take one qubit argument
-ONE_QUBIT = {'H', 'X', 'Z', 'MEASURE'}
+ONE_QUBIT = {'H', 'X', 'Z', 'MEASURE', 'T', 'TDG', 'S', 'SDG'}
 # Instructions that take two qubit arguments
 TWO_QUBIT = {'CNOT'}
 # Instructions that take an immediate

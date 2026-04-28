@@ -394,6 +394,70 @@ module qsim_tb;
         check_amp(2, 16'sd0,     16'sd0, 0);
         check_amp(3, 16'sd0,     16'sd0, 0);
 
+        // ===== Test 12: T gate on |1> — amp[1] becomes (11585, 11585) =====
+        $display("\n===== Test 12: T on q0 from |001> =====");
+        load_program(
+            16'h1000, // RESET
+            16'h3000, // X 0 -> |001>
+            16'hB000, // T 0
+            16'hF000, // HALT
+            16'h0000, 16'h0000, 16'h0000, 16'h0000
+        );
+        reset_and_wait;
+        wait_for_halt;
+        // T|1> = e^{i pi/4}|1> -> amp[1] = cos45 + i sin45 = (11585, 11585)
+        check_amp(0, 16'sd0,     16'sd0,     0);
+        check_amp(1, 16'sd11585, 16'sd11585, 2);
+
+        // ===== Test 13: T + T = S =====
+        $display("\n===== Test 13: T;T = S (from |001>) =====");
+        load_program(
+            16'h1000, // RESET
+            16'h3000, // X 0  -> |001>
+            16'hB000, // T 0
+            16'hB000, // T 0  (= S)
+            16'hF000, // HALT
+            16'h0000, 16'h0000, 16'h0000
+        );
+        reset_and_wait;
+        wait_for_halt;
+        // S|1> = i|1> -> amp[1] = (0, 16384)
+        check_amp(0, 16'sd0,     16'sd0,     0);
+        check_amp(1, 16'sd0,     16'sd16384, 3);
+
+        // ===== Test 14: S;Sdg = I =====
+        $display("\n===== Test 14: S;Sdg = I (from |001>) =====");
+        load_program(
+            16'h1000, // RESET
+            16'h3000, // X 0 -> |001>
+            16'hD000, // S 0
+            16'hE000, // SDG 0
+            16'hF000, // HALT
+            16'h0000, 16'h0000, 16'h0000
+        );
+        reset_and_wait;
+        wait_for_halt;
+        check_amp(0, 16'sd0,     16'sd0, 0);
+        check_amp(1, 16'sd16384, 16'sd0, 1);
+
+        // ===== Test 15: T;Tdg = I =====
+        $display("\n===== Test 15: T;Tdg = I (from |001>) =====");
+        load_program(
+            16'h1000, // RESET
+            16'h3000, // X 0 -> |001>
+            16'hB000, // T 0
+            16'hC000, // TDG 0
+            16'hF000, // HALT
+            16'h0000, 16'h0000, 16'h0000
+        );
+        reset_and_wait;
+        wait_for_halt;
+        // T then Tdg: multiplication by 1/sqrt(2)*(1+i) then 1/sqrt(2)*(1-i) = 1
+        // Due to Q2.14 rounding: 11585^2 / 16384 = 8192, x2 for re-part -> 16384, im cancels.
+        // Allow tolerance of a few LSB.
+        check_amp(0, 16'sd0,     16'sd0, 0);
+        check_amp(1, 16'sd16384, 16'sd0, 3);
+
         // ===== Summary =====
         $display("\n========================================");
         $display("TOTAL: %0d passed, %0d failed", total_pass, total_fail);

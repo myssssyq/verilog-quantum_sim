@@ -1,226 +1,160 @@
 # quantum_sim
 
-I made this little project during spring break to combine my knowledge about FPGA from RISC-V CPU creation and reading Nielsen & Chuang Quantum Computing and Information book.
+A 3-qubit quantum circuit simulator for the Tang Nano 9K.
 
-This project was aimed to use my theoretical quantum computing knowledge in a practical environment.
+It is a classical hardware simulator of quantum state evolution. The design uses a custom 16-bit ISA, stores the full 3-qubit state vector in BRAM as Q2.14 fixed-point, applies a small native gate set in HDL, handles measurement with collapse and renormalization, and prints results over UART. There is also a Python assembler, a Python reference simulator, and a small host-side compiler for lowering higher-level gates to the native instruction stream.
 
-This is a 3-qubit quantum circuit simulator for the Tang Nano 9K. 
+I built this over spring break after finishing a RISC-V CPU on the same board. I was reading Nielsen & Chuang at the time and wanted one project that combined the hardware side with the quantum-information side instead of keeping them separate.
 
-It supports:
+## What it does
 
-- custom 16-bit instruction set 
--  stores the full state vector in fixed-point format 
--  applies a few basic quantum gates, 
--  performs measurement, 
-- and sends results through UART.
+- Stores the 8 complex amplitudes of a 3-qubit state in BRAM, with real and imaginary parts as signed 16-bit Q2.14 values.
+- Runs these native gates in hardware: `H`, `X`, `Z`, `S`, `SDG`, `T`, `TDG`, `CNOT`.
+- Runs these control and I/O operations: `RESET`, `INITBASIS`, `MEASURE`, `DUMPSTATE`, `SHOTS`, `RUNSHOTS`, `HALT`, `NOP`.
+- Handles measurement by accumulating probabilities, picking a branch with an LFSR, collapsing the state, and renormalizing with a 32-entry `1/sqrt(p)` LUT.
+- Supports shot mode with `SHOTS n` followed by `RUNSHOTS`.
+- Emits state dumps and measurement results over UART.
+- Assembles `.qasm` into `program.hex`.
+- Includes a Python reference simulator that mirrors the HDL semantics.
+- Includes `tools/qcompiler/` for lowering selected higher-level gates to the native instruction stream.
 
-It is not a real quantum computer. It is a classical hardware simulator of quantum state evolution.
-
-## What the project does
-
-- simulates a 3-qubit state vector on FPGA
-- uses Q2.14 fixed-point numbers for real and imaginary parts
-- supports `H`, `X`, `Z`, `CNOT`, `MEASURE`, `RESET`, `INITBASIS`, `DUMPSTATE`, `SHOTS`, `RUNSHOTS`, `HALT`
-- stores the 8 complex amplitudes of the state
-- prints state / measurement information through UART
-- uses a Python assembler to turn custom `.qasm` code into `program.hex`
-
-## Why only 3 qubits
-
-For `n` qubits, a full state vector needs `2^n` complex amplitudes.
-
-So for 3 qubits:
-
-- `2^3 = 8` amplitudes
-
-I choose 3 because it would be a hustle to make 16 amplitudes and 2 qubits sounded too easy.
-
-## Main idea
-
-The simulator stores a state like
-
-`|psi> = a0|000> + a1|001> + a2|010> + ... + a7|111>`
-
-where each `a_k` is a complex amplitude.
-
-Each amplitude has real and imaginary part
-
-Both are stored in signed Q2.14 fixed-point format.
-
-So for example:
-
-- `1.0 = 16384 = 0x4000`
-- `1/sqrt(2) ≈ 0.7071 ≈ 11585`
-
-This project keeps the full 3-qubit state in memory and updates it gate by gate.
-
-## Important math behind the project
-
-### 1. State vector
-
-A 3-qubit system is represented by 8 basis states:
-
-- `|000>`
-- `|001>`
-- `|010>`
-- `|011>`
-- `|100>`
-- `|101>`
-- `|110>`
-- `|111>`
-
-So the full state is
-
-`|psi> = sum(a_k |k>)`
-
-with normalization
-
-`sum(|a_k|^2) = 1`
-
-This is the main object the FPGA stores and updates.
-
-### 2. Single-qubit gates work on pairs of amplitudes
-
-A gate acting on one qubit does not touch amplitudes one by one randomly. It works on pairs of basis states that differ only in that qubit.
-
-Example: if the gate acts on qubit 0, the pairs are:
-
-- `|000>` and `|001>`
-- `|010>` and `|011>`
-- `|100>` and `|101>`
-- `|110>` and `|111>`
-
-That is why the gate engine processes the state as pairs.
-
-### 3. Hadamard gate
-
-For one pair of amplitudes `(a, b)`, the Hadamard update is:
-
-`a' = (a + b) / sqrt(2)`
-
-`b' = (a - b) / sqrt(2)`
-
-### 4. X gate
-
-The `X` gate swaps the two amplitudes in a pair.
-
-### 5. Z gate
-
-The `Z` gate leaves the `0` side unchanged and multiplies the `1` side by `-1`.
-
-### 6. CNOT gate
-
-`CNOT` uses one control qubit and one target qubit.
-
-If the control bit is `1`, the target pair is swapped.
-If the control bit is `0`, nothing happens.
-
-### 7. Measurement
-
-Measurement is based on probabilities.
-
-If the amplitudes of all basis states where measured qubit = 0 are collected into one set, and the amplitudes where measured qubit = 1 are collected into another set, then:
-
-- probability of result 0 = sum of squared magnitudes on the 0 side
-- probability of result 1 = sum of squared magnitudes on the 1 side
-
-The hardware accumulates these probabilities, chooses an outcome using an LFSR-based pseudo-random source, collapses the losing side to zero, and renormalizes the surviving side.
-
-## File structure
+## Layout
 
 ```text
 src/
-  qsim.v          top-level control and FSM
-  decoder.v       instruction decoder
-  gate_engine.v   executes H, X, Z, CNOT
-  state_vec.v     stores the 8 complex amplitudes
-  measure_unit.v  probability calculation, collapse, renormalization
-  uart_printer.v  UART formatting for state / measurement output
+  qsim.v          top-level FSM
+  decoder.v       decode -> (instr_class, gate_id, sys_id, qa, qb, imm)
+  gate_engine.v   1-qubit gates and CNOT
+  state_vec.v     8 complex amplitudes in BRAM
+  measure_unit.v  probability accumulation, collapse, renormalization
+  uart_printer.v  UART output formatting
   uart_tx.v       UART transmitter
   pc.v            program counter
   imem.v          instruction ROM loaded from program.hex
-  reset_gen.v     power-on reset + button synchronizer
+  reset_gen.v     power-on reset + button sync
 
 sim/
-  qsim_tb.v       testbench
-
-programs/
-  bell_state.qasm
-  ghz_state.qasm
-  measure_shots.qasm
-  demo.qasm
+  qsim_tb.v       full-system testbench
+  decoder_tb.v    decoder unit test
 
 tools/
-  assembler.py    converts .qasm into program.hex
+  assembler.py    .qasm -> program.hex
+  qcompiler/      host-side gate compiler
 
-program.hex       machine code loaded by instruction memory
-tangnano9k.cst    pin constraints for Tang Nano 9K
+reference_sim.py  Python reference simulator
+uart_host.py      host-side UART receiver
+program.hex       machine code loaded by imem.v
+tangnano9k.cst    Tang Nano 9K pin constraints
 ```
 
-## Current instruction set
+The decoder emits a compact bundle (`instr_class`, `gate_id`, `sys_id`) instead of one boolean per opcode. Adding a new native gate is one line in `decoder.v` and one branch in `gate_engine.v`.
 
-- `NOP`
-- `RESET`
-- `INITBASIS <n>`
-- `H <q>`
-- `X <q>`
-- `Z <q>`
-- `CNOT <target>, <control>`
-- `MEASURE <q>`
-- `DUMPSTATE`
-- `SHOTS <n>`
-- `RUNSHOTS`
-- `HALT`
+## Instruction set
 
-## How to use it right now
+Instruction format:
 
-### 1. Assemble a program
+```text
+[15:12] opcode | [11:10] qa | [9:8] qb | [7:0] imm
+```
+
+| Opcode | Mnemonic        |
+|-------:|-----------------|
+| `0x0`  | `NOP`           |
+| `0x1`  | `RESET`         |
+| `0x2`  | `H <q>`         |
+| `0x3`  | `X <q>`         |
+| `0x4`  | `Z <q>`         |
+| `0x5`  | `CNOT <t>,<c>`  |
+| `0x6`  | `MEASURE <q>`   |
+| `0x7`  | `DUMPSTATE`     |
+| `0x8`  | `INITBASIS <n>` |
+| `0x9`  | `SHOTS <n>`     |
+| `0xA`  | `RUNSHOTS`      |
+| `0xB`  | `T <q>`         |
+| `0xC`  | `TDG <q>`       |
+| `0xD`  | `S <q>`         |
+| `0xE`  | `SDG <q>`       |
+| `0xF`  | `HALT`          |
+
+A 1-qubit gate on qubit `k` only mixes amplitudes that differ in bit `k`. The gate engine iterates over the 4 affected pairs and applies a fixed-point update. `H` uses the shared `1/sqrt(2)` multiplier path. `S`, `SDG`, `T`, and `TDG` only modify the `|1>` side. `CNOT` is a conditional pair swap with no multiply.
+
+Measurement accumulates `prob0` in Q4.28, compares a 16-bit LFSR output against the threshold, zeroes the losing amplitudes, and rescales the survivors through a 32-entry Q3.13 `1/sqrt(p_keep)` LUT, with a shortcut for the deterministic `p = 1.0` case.
+
+## Running it
+
+Assemble a program:
 
 ```bash
 python tools/assembler.py programs/bell_state.qasm
 ```
 
-This generates `program.hex`.
-
-### 2. Simulate in Verilog
+Simulate the full design:
 
 ```bash
-iverilog -o qsim_sim sim/qsim_tb.v src/qsim.v src/decoder.v \
-  src/gate_engine.v src/state_vec.v src/measure_unit.v \
-  src/uart_printer.v src/uart_tx.v src/pc.v src/imem.v src/reset_gen.v
-vvp qsim_sim
+iverilog -g2005 -o sim/qsim_sim src/*.v sim/qsim_tb.v
+vvp sim/qsim_sim
 ```
 
-### 3. Synthesize for FPGA
+Run only the decoder test:
 
-Open the project in Gowin EDA, add the files from `src/`, set `qsim.v` as top module, apply `tangnano9k.cst`, then synthesize and upload to the Tang Nano 9K.
+```bash
+iverilog -g2005 -o sim/decoder_sim src/decoder.v sim/decoder_tb.v
+vvp sim/decoder_sim
+```
 
-## Example idea
+Run compiler tests:
 
-A Bell state can be prepared with:
+```bash
+python -m unittest tools.qcompiler.tests.test_compile
+```
+
+For FPGA runs, open the project in Gowin EDA, add the files in `src/`, set `qsim.v` as top, apply `tangnano9k.cst`, and upload to the Tang Nano 9K.
+
+Example Bell-state program:
 
 ```text
 RESET
 H 0
-CNOT 1,0
+CNOT 1, 0
 DUMPSTATE
 HALT
 ```
 
-This should create a state equivalent to:
+Expected result: `(|000> + |011>) / sqrt(2)`. In Q2.14 both nonzero amplitudes land at `11585`.
 
-`(|000> + |011>) / sqrt(2)`
+## Verification
 
-## Limitations
+Three test suites are in place:
 
-- only 3 qubits
-- full state vector approach, so it does not scale well
-- fixed-point precision is limited
-- measurement randomness is pseudo-random, not physical randomness
-- only a small basic gate set is implemented right now
+- `sim/qsim_tb.v`: 15 sections and 41 amplitude checks. Covers Bell, GHZ, `X` on each qubit, `H-Z-H = X`, uniform superposition, `INITBASIS`, Bell measurement correlation, idempotent measurement, shot mode, `T` on `|001>`, `T·T = S`, `S·SDG = I`, and `T·TDG = I`.
+- `sim/decoder_tb.v`: 21 checks covering every opcode value and operand pass-through.
+- `tools/qcompiler/tests/test_compile.py`: 28 checks covering synthesis paths, peephole optimization, hex emission, and unitarity validation.
 
-## Future plans
+`reference_sim.py` implements the same semantics in Python, so HDL behavior can be checked against it.
 
-- add `reference_sim.py` for software-side simulation / checking
-- add `uart_host.py` to make UART output easier to read and use
-- add quantum gate decomposition using the Solovay-Kitaev theorem
+## qcompiler
+
+The compiler lives under `tools/qcompiler/`. You give it a gate by name, a 2x2 or 4x4 matrix, or a small circuit, and it returns a native instruction stream plus the numerical distance from the target.
+
+It tries these paths in order:
+
+1. Native gate match up to global phase.
+2. Single-qubit Clifford match.
+3. Short exact word in `{H, X, Z, S, SDG, T, TDG}` found by bounded-depth BFS.
+4. Best bounded-depth approximation if no exact word is found, with the residual reported.
+5. Named 2-qubit decompositions for `CZ`, `SWAP`, `ISWAP`, `CY`, `CS`, and `CSDG`.
+
+After that it runs a peephole pass that cancels adjacent inverses and merges diagonal phase runs.
+
+Minimal example:
+
+```python
+from tools.qcompiler import compile_circuit
+
+r = compile_circuit([('H', 0), ('CNOT', 1, 0)])
+r.hex_words  # [0x2000, 0x5400]
+```
+
+## Photo of tests run
+
+Both Bell state and GHZ state coompiled on command prompt, verified using reference_sim.py against UART output from Gowin Programmer.
