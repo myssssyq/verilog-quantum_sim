@@ -158,3 +158,4 @@ r.hex_words  # [0x2000, 0x5400]
 ## Photo of tests run
 
 Both Bell state and GHZ state coompiled on command prompt, verified using reference_sim.py against UART output from Gowin Programmer.
+<img width="2560" height="1920" alt="photo_2026-04-28_11-20-11" src="https://github.com/user-attachments/assets/41286503-7645-4d01-b06a-2a6b0097bbea" />
